@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Просмотр расходных материалов</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        #searchForm {
+            margin-bottom: 20px;
+        }
+
+        #consumablesList {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+            #consumablesList th, #consumablesList td {
+                border: 1px solid #ccc;
+                padding: 8px;
+                text-align: left;
+            }
+    </style>
+</head>
+<body>
+    <h1>Просмотр расходных материалов</h1>
+
+    <form id="searchForm">
+        <label for="patientId">Введите ID Пациента:</label>
+        <input type="number" id="patientId" required>
+        <button type="submit">Найти расходники</button>
+    </form>
+
+    <p class="message" id="responseMessage"></p>
+    <table id="consumablesList">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Название</th>
+                <th>Количество</th>
+                <th>Срок годности</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <script>
+        const searchForm = document.getElementById('searchForm');
+        const consumablesList = document.getElementById('consumablesList').querySelector('tbody');
+        const messageElement = document.getElementById('responseMessage');
+
+        searchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const patientId = document.getElementById('patientId').value;
+            consumablesList.innerHTML = ''; // Очищаем таблицу
+            messageElement.textContent = '';
+
+            if (!patientId) {
+                messageElement.textContent = 'Введите ID пациента.';
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/patients/${patientId}/consumables`);
+                const result = await response.json();
+
+                if (response.ok) {
+                    if (result.length > 0) {
+                        result.forEach(consumable => {
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td>${consumable.consumable_id}</td>
+                                <td>${consumable.name}</td>
+                                <td>${consumable.quantity_in_pack || 'N/A'}</td>
+                                <td>${consumable.expiration_date ? new Date(consumable.expiration_date).toLocaleDateString() : 'N/A'}</td>
+                            `;
+                            consumablesList.appendChild(row);
+                        });
+                    } else {
+                        messageElement.textContent = 'Расходные материалы для этого пациента не найдены.';
+                    }
+                } else {
+                    messageElement.textContent = result.error;
+                    messageElement.style.color = 'red';
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                messageElement.textContent = 'Ошибка при получении данных.';
+                messageElement.style.color = 'red';
+            }
+        });
+    </script>
+</body>
+</html>

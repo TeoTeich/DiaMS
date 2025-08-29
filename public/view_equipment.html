@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Просмотр оборудования</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        #searchForm {
+            margin-bottom: 20px;
+        }
+
+        #equipmentList {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+            #equipmentList th, #equipmentList td {
+                border: 1px solid #ccc;
+                padding: 8px;
+                text-align: left;
+            }
+    </style>
+</head>
+<body>
+    <h1>Просмотр медицинского оборудования</h1>
+
+    <form id="searchForm">
+        <label for="patientId">Введите ID Пациента:</label>
+        <input type="number" id="patientId" required>
+        <button type="submit">Найти оборудование</button>
+    </form>
+
+    <p class="message" id="responseMessage"></p>
+    <table id="equipmentList">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Название</th>
+                <th>Серийный номер</th>
+                <th>Дата покупки</th>
+                <th>Гарантия до</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <script>
+        const searchForm = document.getElementById('searchForm');
+        const equipmentList = document.getElementById('equipmentList').querySelector('tbody');
+        const messageElement = document.getElementById('responseMessage');
+
+        searchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const patientId = document.getElementById('patientId').value;
+            equipmentList.innerHTML = ''; // Очищаем таблицу перед новым поиском
+            messageElement.textContent = '';
+
+            if (!patientId) {
+                messageElement.textContent = 'Введите ID пациента.';
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/patients/${patientId}/equipment`);
+                const result = await response.json();
+
+                if (response.ok) {
+                    if (result.length > 0) {
+                        result.forEach(equipment => {
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td>${equipment.equipment_id}</td>
+                                <td>${equipment.name}</td>
+                                <td>${equipment.serial_number || 'N/A'}</td>
+                                <td>${equipment.purchase_date ? new Date(equipment.purchase_date).toLocaleDateString() : 'N/A'}</td>
+                                <td>${equipment.warranty_expiration_date ? new Date(equipment.warranty_expiration_date).toLocaleDateString() : 'N/A'}</td>
+                            `;
+                            equipmentList.appendChild(row);
+                        });
+                    } else {
+                        messageElement.textContent = 'Оборудование для этого пациента не найдено.';
+                    }
+                } else {
+                    messageElement.textContent = result.error;
+                    messageElement.style.color = 'red';
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                messageElement.textContent = 'Ошибка при получении данных.';
+                messageElement.style.color = 'red';
+            }
+        });
+    </script>
+</body>
+</html>

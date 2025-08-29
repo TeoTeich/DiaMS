@@ -1,7 +1,8 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\public"
   ],
-  "SelectedNode": "\\README.md",
+  "SelectedNode": "\\public\\index.html",
   "PreviewInSolutionExplorer": false
 }

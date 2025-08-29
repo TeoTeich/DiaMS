@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация пациента</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            width: 300px;
+            gap: 10px;
+        }
+
+        input {
+            padding: 8px;
+        }
+
+        button {
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        .message {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Регистрация пациента</h1>
+    <form id="patientForm">
+        <label for="fullName">Полное имя:</label>
+        <input type="text" id="fullName" name="full_name" required>
+
+        <label for="dateOfBirth">Дата рождения:</label>
+        <input type="date" id="dateOfBirth" name="date_of_birth">
+
+        <label for="diabetesType">Тип диабета:</label>
+        <input type="text" id="diabetesType" name="diabetes_type" required>
+
+        <label for="contactInfo">Контактная информация:</label>
+        <input type="text" id="contactInfo" name="contact_info">
+
+        <button type="submit">Зарегистрировать</button>
+    </form>
+    <p class="message" id="responseMessage"></p>
+
+    <script>
+        const form = document.getElementById('patientForm');
+        const messageElement = document.getElementById('responseMessage');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault(); // Предотвращаем стандартную отправку формы
+
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            try {
+                const response = await fetch('http://localhost:3000/api/patients', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                messageElement.textContent = result.message;
+
+                if (response.status === 201) {
+                    messageElement.style.color = 'green';
+                    form.reset(); // Сброс формы после успешной отправки
+                } else {
+                    messageElement.style.color = 'red';
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                messageElement.textContent = 'Ошибка при отправке данных.';
+                messageElement.style.color = 'red';
+            }
+        });
+    </script>
+</body>
+</html>
