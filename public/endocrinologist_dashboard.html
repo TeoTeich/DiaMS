@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Панель врача-эндокринолога</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        h1, h2 { color: #333; }
+        .nav-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
+        .nav-item { display: block; padding: 20px; border: 1px solid #ddd; border-radius: 8px; text-decoration: none; color: #007bff; text-align: center; }
+        .nav-item:hover { transform: translateY(-3px); box-shadow: 0 4px 8px rgba(0,123,255,0.1); }
+    </style>
+</head>
+<body>
+    <h1>Панель врача-эндокринолога</h1>
+    <p>Добро пожаловать в административную панель.</p>
+    
+    <div class="nav-grid">
+        <a href="add_patient.html" class="nav-item">Зарегистрировать нового пациента</a>
+        <a href="view_patients.html" class="nav-item">Просмотр списка пациентов</a>
+        <a href="view_equipment.html" class="nav-item">Просмотр оборудования</a>
+        <a href="view_consumables.html" class="nav-item">Просмотр расходников</a>
+    </div>
+
+    <button onclick="logout()">Выйти</button>
+
+    <script>
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('role');
+            window.location.href = '/login.html';
+        }
+
+        // Проверка авторизации
+        const token = localStorage.getItem('token');
+        const role = localStorage.getItem('role');
+        if (!token || role !== 'endocrinologist') {
+            window.location.href = '/login.html'; // Если нет токена или роль неверна, перенаправляем на страницу входа
+        }
+    </script>
+</body>
+</html>

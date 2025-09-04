@@ -1,59 +1,105 @@
-// Импорт express
 const express = require('express');
 const app = express();
 const pool = require('./db');
+const path = require('path');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
-// Определение порта, на котором будет работать сервер
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = '1234'; // ВАЖНО: Замените на сложный секретный ключ!
 
-// Middleware для обработки JSON-данных
+// Middleware для обработки JSON-запросов
 app.use(express.json());
+
+// Отдача главной страницы (login.html) при запросе корня сайта
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Отдача статических файлов (HTML, CSS, JS) из папки public
 app.use(express.static('public'));
 
-// Маршрут для проверки подключения к БД
-app.get('/test-db', async (req, res) => {
+// Middleware для проверки токена и роли пользователя
+const auth = (role) => (req, res, next) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) {
+        return res.status(401).json({ error: 'Доступ запрещен. Нет токена.' });
+    }
     try {
-        // Получение соединения из пула
-        const connection = await pool.getConnection();
-        // Выполнение простого запроса (например, получение текущей даты)
-        const [rows] = await connection.query('SELECT NOW() AS now');
-        connection.release(); // Обязательно освободить соединение
-
-        res.status(200).json({ message: 'Соединение с базой данных успешно установлено!', time: rows[0].now });
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded; // Добавляем данные пользователя в объект запроса
+        if (role && req.user.role !== role) {
+            return res.status(403).json({ error: 'Доступ запрещен. Недостаточно прав.' });
+        }
+        next();
     } catch (err) {
-        console.error('Ошибка подключения к БД:', err);
-        res.status(500).json({ error: 'Не удалось подключиться к базе данных.' });
+        res.status(401).json({ error: 'Недействительный токен.' });
+    }
+};
+
+//---
+// Маршруты аутентификации
+
+// Регистрация врача (доступно только через API)
+app.post('/api/register-endocrinologist', async (req, res) => {
+    const { username, password, full_name } = req.body;
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await pool.query(
+            'INSERT INTO Endocrinologists (username, password, full_name) VALUES (?, ?, ?)',
+            [username, hashedPassword, full_name]
+        );
+        res.status(201).json({ message: 'Врач успешно зарегистрирован' });
+    } catch (err) {
+        console.error('Ошибка при регистрации врача:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
-// Маршрут для регистрации нового пациента
-app.post('/api/patients', async (req, res) => {
-    // Получение данных из тела запроса
-    const { full_name, date_of_birth, diabetes_type, contact_info } = req.body;
-
-    // Проверка, что обязательные поля не пусты
-    if (!full_name || !diabetes_type) {
-        return res.status(400).json({ error: 'Имя и тип диабета являются обязательными полями.' });
-    }
-
+// Вход в систему (логин)
+app.post('/api/login', async (req, res) => {
+    const { username, password, role } = req.body;
     try {
-        // Получение соединения из пула
-        const connection = await pool.getConnection();
+        let user;
+        let userId;
+        let userRole;
+        if (role === 'patient') {
+            const [rows] = await pool.query('SELECT * FROM Patients WHERE username = ?', [username]);
+            if (rows.length === 0) return res.status(401).json({ error: 'Неверные учетные данные' });
+            user = rows[0];
+            userId = user.patient_id;
+            userRole = 'patient';
+        } else if (role === 'endocrinologist') {
+            const [rows] = await pool.query('SELECT * FROM Endocrinologists WHERE username = ?', [username]);
+            if (rows.length === 0) return res.status(401).json({ error: 'Неверные учетные данные' });
+            user = rows[0];
+            userId = user.id;
+            userRole = 'endocrinologist';
+        } else {
+            return res.status(400).json({ error: 'Неверная роль' });
+        }
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return res.status(401).json({ error: 'Неверные учетные данные' });
+        const token = jwt.sign({ id: userId, role: userRole }, JWT_SECRET, { expiresIn: '1h' });
+        res.status(200).json({ token, role: userRole });
+    } catch (err) {
+        console.error('Ошибка входа:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
 
-        // SQL-запрос для вставки данных
-        const sql = `
-      INSERT INTO Patients (full_name, date_of_birth, diabetes_type, contact_info)
-      VALUES (?, ?, ?, ?)
-    `;
-        const values = [full_name, date_of_birth, diabetes_type, contact_info];
+//---
+// Защищённые маршруты для врача
 
-        // Выполнение запроса
-        await connection.query(sql, values);
-
-        // Освобождение соединения
-        connection.release();
-
-        // Отправка успешного ответа
+// Регистрация пациента (доступно только для врача)
+app.post('/api/patients', auth('endocrinologist'), async (req, res) => {
+    const { full_name, date_of_birth, diabetes_type, contact_info, username, password } = req.body;
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await pool.query(
+            'INSERT INTO Patients (full_name, date_of_birth, diabetes_type, contact_info, username, password) VALUES (?, ?, ?, ?, ?, ?)',
+            [full_name, date_of_birth, diabetes_type, contact_info, username, hashedPassword]
+        );
         res.status(201).json({ message: 'Пациент успешно зарегистрирован.' });
     } catch (err) {
         console.error('Ошибка при регистрации пациента:', err);
@@ -61,87 +107,28 @@ app.post('/api/patients', async (req, res) => {
     }
 });
 
-// Маршрут для добавления нового показания
-app.post('/api/readings', async (req, res) => {
-    // Получение данных из тела запроса
-    const { glucose_level, reading_time, notes, patient_id } = req.body;
-
-    // Валидация обязательных полей
-    if (!glucose_level || !reading_time || !patient_id) {
-        return res.status(400).json({ error: 'Уровень глюкозы, время измерения и ID пациента являются обязательными.' });
-    }
-
-    // Проверка на положительное значение глюкозы
-    if (glucose_level <= 0) {
-        return res.status(400).json({ error: 'Уровень глюкозы должен быть положительным числом.' });
-    }
-
+// Получение списка пациентов (доступно только для врача)
+app.get('/api/patients', auth('endocrinologist'), async (req, res) => {
     try {
-        const connection = await pool.getConnection();
-
-        // SQL-запрос для вставки данных
-        const sql = `
-      INSERT INTO Readings (glucose_level, reading_time, notes, patient_id)
-      VALUES (?, ?, ?, ?)
-    `;
-        const values = [glucose_level, reading_time, notes, patient_id];
-
-        await connection.query(sql, values);
-
-        connection.release();
-
-        res.status(201).json({ message: 'Показание успешно добавлено.' });
+        const [rows] = await pool.query('SELECT * FROM Patients');
+        res.status(200).json(rows);
     } catch (err) {
-        console.error('Ошибка при добавлении показания:', err);
-        res.status(500).json({ error: 'Ошибка сервера при добавлении показания.' });
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
-// Маршрут для добавления нового медицинского оборудования
-app.post('/api/equipment', async (req, res) => {
-    const { name, serial_number, purchase_date, warranty_expiration_date, patient_id } = req.body;
-
-    // Проверка обязательных полей
-    if (!name || !patient_id) {
-        return res.status(400).json({ error: 'Название и ID пациента являются обязательными полями.' });
-    }
-
-    try {
-        const connection = await pool.getConnection();
-
-        const sql = `
-      INSERT INTO Medical_Equipment (name, serial_number, purchase_date, warranty_expiration_date, patient_id)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-        const values = [name, serial_number, purchase_date, warranty_expiration_date, patient_id];
-
-        await connection.query(sql, values);
-
-        connection.release();
-
-        res.status(201).json({ message: 'Медицинское оборудование успешно добавлено.' });
-    } catch (err) {
-        console.error('Ошибка при добавлении оборудования:', err);
-        res.status(500).json({ error: 'Ошибка сервера при добавлении оборудования.' });
-    }
-});
-
-// Маршрут для получения всего оборудования пациента
-app.get('/api/patients/:patientId/equipment', async (req, res) => {
+// Получение оборудования по ID пациента (доступно только для врача)
+app.get('/api/patients/:patientId/equipment', auth('endocrinologist'), async (req, res) => {
     const { patientId } = req.params;
-
     try {
         const connection = await pool.getConnection();
-
         const sql = 'SELECT * FROM Medical_Equipment WHERE patient_id = ?';
         const [rows] = await connection.query(sql, [patientId]);
-
         connection.release();
-
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Оборудование для этого пациента не найдено.' });
         }
-
         res.status(200).json(rows);
     } catch (err) {
         console.error('Ошибка при получении оборудования:', err);
@@ -149,51 +136,17 @@ app.get('/api/patients/:patientId/equipment', async (req, res) => {
     }
 });
 
-// Маршрут для добавления нового расходного материала
-app.post('/api/consumables', async (req, res) => {
-    const { name, quantity_in_pack, expiration_date, patient_id } = req.body;
-
-    // Проверка обязательных полей
-    if (!name || !patient_id) {
-        return res.status(400).json({ error: 'Название и ID пациента являются обязательными.' });
-    }
-
-    try {
-        const connection = await pool.getConnection();
-
-        const sql = `
-      INSERT INTO Consumables (name, quantity_in_pack, expiration_date, patient_id)
-      VALUES (?, ?, ?, ?)
-    `;
-        const values = [name, quantity_in_pack, expiration_date, patient_id];
-
-        await connection.query(sql, values);
-
-        connection.release();
-
-        res.status(201).json({ message: 'Расходный материал успешно добавлен.' });
-    } catch (err) {
-        console.error('Ошибка при добавлении расходника:', err);
-        res.status(500).json({ error: 'Ошибка сервера при добавлении расходника.' });
-    }
-});
-
-// Маршрут для получения всех расходных материалов пациента
-app.get('/api/patients/:patientId/consumables', async (req, res) => {
+// Получение расходников по ID пациента (доступно только для врача)
+app.get('/api/patients/:patientId/consumables', auth('endocrinologist'), async (req, res) => {
     const { patientId } = req.params;
-
     try {
         const connection = await pool.getConnection();
-
         const sql = 'SELECT * FROM Consumables WHERE patient_id = ?';
         const [rows] = await connection.query(sql, [patientId]);
-
         connection.release();
-
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Расходные материалы для этого пациента не найдены.' });
         }
-
         res.status(200).json(rows);
     } catch (err) {
         console.error('Ошибка при получении расходников:', err);
@@ -201,6 +154,159 @@ app.get('/api/patients/:patientId/consumables', async (req, res) => {
     }
 });
 
+// Получение показаний по ID пациента (доступно только для врача)
+app.get('/api/patients/:patientId/readings', auth('endocrinologist'), async (req, res) => {
+    const { patientId } = req.params;
+    try {
+        const [rows] = await pool.query('SELECT * FROM Readings WHERE patient_id = ?', [patientId]);
+        res.status(200).json(rows);
+    } catch (err) {
+        console.error('Ошибка получения показаний:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+//---
+// Новые маршруты для редактирования и удаления пациентов (только для врача)
+
+app.put('/api/patients/:id', auth('endocrinologist'), async (req, res) => {
+    const { id } = req.params;
+    let { full_name, date_of_birth, diabetes_type, contact_info } = req.body;
+
+    // Преобразуем дату в формат 'YYYY-MM-DD' для MySQL
+    if (date_of_birth) {
+        const dateObject = new Date(date_of_birth);
+        date_of_birth = dateObject.toISOString().split('T')[0];
+    }
+
+    try {
+        const [result] = await pool.query(
+            'UPDATE Patients SET full_name = ?, date_of_birth = ?, diabetes_type = ?, contact_info = ? WHERE patient_id = ?',
+            [full_name, date_of_birth, diabetes_type, contact_info, id]
+        );
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Пациент не найден.' });
+        }
+        res.status(200).json({ message: 'Информация о пациенте успешно обновлена.' });
+    } catch (err) {
+        console.error('Ошибка при обновлении данных пациента:', err);
+        res.status(500).json({ error: 'Ошибка сервера.' });
+    }
+});
+
+app.delete('/api/patients/:id', auth('endocrinologist'), async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [result] = await pool.query('DELETE FROM Patients WHERE patient_id = ?', [id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Пациент не найден.' });
+        }
+        res.status(200).json({ message: 'Пациент успешно удален.' });
+    } catch (err) {
+        console.error('Ошибка при удалении пациента:', err);
+        res.status(500).json({ error: 'Ошибка сервера.' });
+    }
+});
+
+//---
+// Защищённые маршруты для пациента
+
+// Получение данных текущего пациента (доступно только для пациента)
+app.get('/api/me', auth('patient'), async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM Patients WHERE patient_id = ?', [req.user.id]);
+        if (rows.length === 0) return res.status(404).json({ error: 'Пациент не найден' });
+        res.status(200).json(rows[0]);
+    } catch (err) {
+        console.error('Ошибка получения данных пациента:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Получение показаний текущего пациента (доступно только для пациента)
+app.get('/api/me/readings', auth('patient'), async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM Readings WHERE patient_id = ?', [req.user.id]);
+        res.status(200).json(rows);
+    } catch (err) {
+        console.error('Ошибка получения показаний:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+//---
+// Маршруты для обеих ролей
+
+// Добавление показания (для обеих ролей, но пациент может только себе)
+app.post('/api/readings', auth(), async (req, res) => {
+    const { glucose_level, reading_time, notes, patient_id } = req.body;
+    // Пациент может добавлять показания только для себя
+    if (req.user.role === 'patient' && req.user.id !== patient_id) {
+        return res.status(403).json({ error: 'Доступ запрещен. Вы не можете добавлять показания для другого пациента.' });
+    }
+    try {
+        const connection = await pool.getConnection();
+        const sql = `
+          INSERT INTO Readings (glucose_level, reading_time, notes, patient_id)
+          VALUES (?, ?, ?, ?)
+        `;
+        const values = [glucose_level, reading_time, notes, patient_id];
+        await connection.query(sql, values);
+        connection.release();
+        res.status(201).json({ message: 'Показание успешно добавлено.' });
+    } catch (err) {
+        console.error('Ошибка при добавлении показания:', err);
+        res.status(500).json({ error: 'Ошибка сервера при добавлении показания.' });
+    }
+});
+
+// Добавление оборудования (для обеих ролей)
+app.post('/api/equipment', auth(), async (req, res) => {
+    const { name, serial_number, patient_id } = req.body;
+    // Пациент может добавлять оборудование только для себя
+    if (req.user.role === 'patient' && req.user.id !== patient_id) {
+        return res.status(403).json({ error: 'Доступ запрещен. Вы не можете добавлять оборудование для другого пациента.' });
+    }
+    try {
+        const connection = await pool.getConnection();
+        const sql = `
+          INSERT INTO Medical_Equipment (name, serial_number, patient_id)
+          VALUES (?, ?, ?)
+        `;
+        const values = [name, serial_number, patient_id];
+        await connection.query(sql, values);
+        connection.release();
+        res.status(201).json({ message: 'Оборудование успешно добавлено.' });
+    } catch (err) {
+        console.error('Ошибка при добавлении оборудования:', err);
+        res.status(500).json({ error: 'Ошибка сервера при добавлении оборудования.' });
+    }
+});
+
+// Добавление расходников (для обеих ролей)
+app.post('/api/consumables', auth(), async (req, res) => {
+    const { name, quantity_in_pack, expiration_date, patient_id } = req.body;
+    // Пациент может добавлять расходники только для себя
+    if (req.user.role === 'patient' && req.user.id !== patient_id) {
+        return res.status(403).json({ error: 'Доступ запрещен. Вы не можете добавлять расходники для другого пациента.' });
+    }
+    try {
+        const connection = await pool.getConnection();
+        const sql = `
+          INSERT INTO Consumables (name, quantity_in_pack, expiration_date, patient_id)
+          VALUES (?, ?, ?, ?)
+        `;
+        const values = [name, quantity_in_pack, expiration_date, patient_id];
+        await connection.query(sql, values);
+        connection.release();
+        res.status(201).json({ message: 'Расходный материал успешно добавлен.' });
+    } catch (err) {
+        console.error('Ошибка при добавлении расходника:', err);
+        res.status(500).json({ error: 'Ошибка сервера при добавлении расходника.' });
+    }
+});
+
+// Запуск сервера
 app.listen(PORT, () => {
     console.log(`Сервер запущен на http://localhost:${PORT}`);
 });

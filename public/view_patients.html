@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Список пациентов</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .message {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+
+        #patientsTable {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+            #patientsTable th, #patientsTable td {
+                border: 1px solid #ccc;
+                padding: 8px;
+                text-align: left;
+            }
+
+        .actions-buttons button {
+            padding: 5px 10px;
+            margin-right: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .actions-buttons .edit {
+            background-color: #ffc107;
+            color: #333;
+        }
+
+        .actions-buttons .delete {
+            background-color: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>Список пациентов</h1>
+
+    <p class="message" id="responseMessage"></p>
+    <table id="patientsTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Полное имя</th>
+                <th>Дата рождения</th>
+                <th>Тип диабета</th>
+                <th>Контактная информация</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Данные будут вставлены сюда с помощью JavaScript -->
+        </tbody>
+    </table>
+
+    <a href="endocrinologist_dashboard.html">Вернуться в панель управления</a>
+
+    <script>
+        // Проверка авторизации
+        const token = localStorage.getItem('token');
+        const role = localStorage.getItem('role');
+        if (!token || role !== 'endocrinologist') {
+            window.location.href = '/login.html';
+        }
+
+        async function fetchPatients() {
+            const messageElement = document.getElementById('responseMessage');
+            const patientsTableBody = document.getElementById('patientsTable').querySelector('tbody');
+
+            patientsTableBody.innerHTML = ''; // Очищаем таблицу перед загрузкой
+
+            try {
+                const response = await fetch('/api/patients', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const patients = await response.json();
+
+                if (response.ok) {
+                    if (patients.length > 0) {
+                        patients.forEach(patient => {
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                    <td>${patient.patient_id}</td>
+                                    <td>${patient.full_name}</td>
+                                    <td>${patient.date_of_birth ? new Date(patient.date_of_birth).toLocaleDateString() : 'N/A'}</td>
+                                    <td>${patient.diabetes_type}</td>
+                                    <td>${patient.contact_info || 'N/A'}</td>
+                                    <td class="actions-buttons">
+                                        <button class="edit" onclick="handleEdit('${patient.patient_id}', '${patient.full_name}', '${patient.date_of_birth}', '${patient.diabetes_type}', '${patient.contact_info}')">Редактировать</button>
+                                        <button class="delete" onclick="handleDelete('${patient.patient_id}')">Удалить</button>
+                                    </td>
+                                `;
+                            patientsTableBody.appendChild(row);
+                        });
+                    } else {
+                        messageElement.textContent = 'В системе пока нет пациентов.';
+                    }
+                } else {
+                    messageElement.textContent = patients.error || 'Ошибка загрузки данных.';
+                    messageElement.style.color = 'red';
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                messageElement.textContent = 'Ошибка при загрузке списка пациентов.';
+                messageElement.style.color = 'red';
+            }
+        }
+
+        async function handleEdit(id, full_name, date_of_birth, diabetes_type, contact_info) {
+            const newFullName = prompt('Введите новое полное имя:', full_name);
+            const newDateOfBirth = prompt('Введите новую дату рождения (гггг-мм-дд):', date_of_birth);
+            const newDiabetesType = prompt('Введите новый тип диабета:', diabetes_type);
+            const newContactInfo = prompt('Введите новую контактную информацию:', contact_info);
+
+            if (newFullName && newDateOfBirth && newDiabetesType && newContactInfo) {
+                try {
+                    const response = await fetch(`/api/patients/${id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            full_name: newFullName,
+                            date_of_birth: newDateOfBirth,
+                            diabetes_type: newDiabetesType,
+                            contact_info: newContactInfo
+                        })
+                    });
+                    const result = await response.json();
+                    if (response.ok) {
+                        alert(result.message);
+                        fetchPatients(); // Обновляем список
+                    } else {
+                        alert(result.error || 'Не удалось обновить данные.');
+                    }
+                } catch (error) {
+                    console.error('Ошибка:', error);
+                    alert('Произошла ошибка при редактировании.');
+                }
+            }
+        }
+
+        async function handleDelete(id) {
+            if (confirm('Вы уверены, что хотите удалить этого пациента?')) {
+                try {
+                    const response = await fetch(`/api/patients/${id}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    const result = await response.json();
+                    if (response.ok) {
+                        alert(result.message);
+                        fetchPatients(); // Обновляем список
+                    } else {
+                        alert(result.error || 'Не удалось удалить пациента.');
+                    }
+                } catch (error) {
+                    console.error('Ошибка:', error);
+                    alert('Произошла ошибка при удалении.');
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', fetchPatients);
+    </script>
+</body>
+</html>

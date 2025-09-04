@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Личный кабинет пациента</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        #data-container {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Личный кабинет пациента</h1>
+    <p>Добро пожаловать, <span id="patientName"></span>!</p>
+
+    <div id="data-container">
+        <h2>Мои данные</h2>
+        <p><strong>ID:</strong> <span id="patientId"></span></p>
+        <p><strong>Полное имя:</strong> <span id="patientFullName"></span></p>
+        <p><strong>Дата рождения:</strong> <span id="patientDob"></span></p>
+        <p><strong>Тип диабета:</strong> <span id="patientType"></span></p>
+    </div>
+
+    <button onclick="logout()">Выйти</button>
+
+    <script>
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('role');
+            window.location.href = '/login.html';
+        }
+
+        async function fetchPatientData() {
+            const token = localStorage.getItem('token');
+            const role = localStorage.getItem('role');
+
+            if (!token || role !== 'patient') {
+                window.location.href = '/login.html';
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/me', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('patientName').textContent = data.full_name;
+                    document.getElementById('patientId').textContent = data.patient_id;
+                    document.getElementById('patientFullName').textContent = data.full_name;
+                    document.getElementById('patientDob').textContent = data.date_of_birth;
+                    document.getElementById('patientType').textContent = data.diabetes_type;
+                } else {
+                    console.error('Ошибка получения данных:', data.error);
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', fetchPatientData);
+    </script>
+</body>
+</html>
